@@ -23,6 +23,7 @@ import collections
 import numpy as np
 
 import tensorflow as tf
+import tensorflow_addons as tfa
 
 from . import model_helper
 from .utils import iterator_utils
@@ -170,19 +171,19 @@ class BaseModel(object):
 
   def _set_train_or_infer(self, res, reverse_target_vocab_table, hparams):
     """Set up training and inference."""
-    if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+    if self.mode == tf.estimator.ModeKeys.TRAIN:
       self.train_loss = res[1]
       self.word_count = tf.reduce_sum(
           input_tensor=self.iterator.source_sequence_length) + tf.reduce_sum(
               input_tensor=self.iterator.target_sequence_length)
-    elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
+    elif self.mode == tf.estimator.ModeKeys.EVAL:
       self.eval_loss = res[1]
-    elif self.mode == tf.contrib.learn.ModeKeys.INFER:
+    elif self.mode == "infer":
       self.infer_logits, _, self.final_context_state, self.sample_id = res
       self.sample_words = reverse_target_vocab_table.lookup(
           tf.cast(self.sample_id, dtype=tf.int64))
 
-    if self.mode != tf.contrib.learn.ModeKeys.INFER:
+    if self.mode != "infer":
       ## Count the number of predicted words for compute ppl.
       self.predict_count = tf.reduce_sum(
           input_tensor=self.iterator.target_sequence_length)
@@ -191,7 +192,7 @@ class BaseModel(object):
 
     # Gradients and SGD update operation for training the model.
     # Arrange for the embedding vars to appear at the beginning.
-    if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+    if self.mode == tf.estimator.ModeKeys.TRAIN:
       self.learning_rate = tf.constant(hparams.learning_rate)
       # warm-up
       self.learning_rate = self._get_learning_rate_warmup(hparams)
@@ -221,7 +222,7 @@ class BaseModel(object):
 
       # Summary
       self.train_summary = self._get_train_summary()
-    elif self.mode == tf.contrib.learn.ModeKeys.INFER:
+    elif self.mode == "infer":
       self.infer_summary = self._get_infer_summary(hparams)
 
     # Print trainable variables
@@ -325,7 +326,7 @@ class BaseModel(object):
 
   def train(self, sess):
     """Execute train graph."""
-    assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
+    assert self.mode == tf.estimator.ModeKeys.TRAIN
     output_tuple = TrainOutputTuple(train_summary=self.train_summary,
                                     train_loss=self.train_loss,
                                     predict_count=self.predict_count,
@@ -338,7 +339,7 @@ class BaseModel(object):
 
   def eval(self, sess):
     """Execute eval graph."""
-    assert self.mode == tf.contrib.learn.ModeKeys.EVAL
+    assert self.mode == tf.estimator.ModeKeys.EVAL
     output_tuple = EvalOutputTuple(eval_loss=self.eval_loss,
                                    predict_count=self.predict_count,
                                    batch_size=self.batch_size)
@@ -392,7 +393,7 @@ class BaseModel(object):
           self._build_decoder(self.encoder_outputs, encoder_state, hparams))
 
       ## Loss
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode != "infer":
         with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
                                                    self.num_gpus)):
           loss = self._compute_loss(logits, decoder_cell_outputs)
@@ -478,7 +479,7 @@ class BaseModel(object):
       decoder_cell_outputs = None
 
       ## Train or eval
-      if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      if self.mode != "infer":
         # decoder_emp_inp: [max_time, batch_size, num_units]
         target_input = iterator.target_input
         if self.time_major:
@@ -487,18 +488,18 @@ class BaseModel(object):
             params=self.embedding_decoder, ids=target_input)
 
         # Helper
-        helper = tf.contrib.seq2seq.TrainingHelper(
+        helper = tfa.seq2seq.TrainingSampler(
             decoder_emb_inp, iterator.target_sequence_length,
             time_major=self.time_major)
 
         # Decoder
-        my_decoder = tf.contrib.seq2seq.BasicDecoder(
+        my_decoder = tfa.seq2seq.BasicDecoder(
             cell,
             helper,
             decoder_initial_state,)
 
         # Dynamic decoding
-        outputs, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
+        outputs, final_context_state, _ = tfa.seq2seq.dynamic_decode(
             my_decoder,
             output_time_major=self.time_major,
             swap_memory=True,
@@ -543,7 +544,7 @@ class BaseModel(object):
           length_penalty_weight = hparams.length_penalty_weight
           coverage_penalty_weight = hparams.coverage_penalty_weight
 
-          my_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+          my_decoder = tfa.seq2seq.BeamSearchDecoder(
               cell=cell,
               embedding=self.embedding_decoder,
               start_tokens=start_tokens,
@@ -559,18 +560,18 @@ class BaseModel(object):
           assert sampling_temperature > 0.0, (
               "sampling_temperature must greater than 0.0 when using sample"
               " decoder.")
-          helper = tf.contrib.seq2seq.SampleEmbeddingHelper(
+          helper = tfa.seq2seq.SampleEmbeddingHelper(
               self.embedding_decoder, start_tokens, end_token,
               softmax_temperature=sampling_temperature,
               seed=self.random_seed)
         elif infer_mode == "greedy":
-          helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+          helper = tfa.seq2seq.GreedyEmbeddingHelper(
               self.embedding_decoder, start_tokens, end_token)
         else:
           raise ValueError("Unknown infer_mode '%s'", infer_mode)
 
         if infer_mode != "beam_search":
-          my_decoder = tf.contrib.seq2seq.BasicDecoder(
+          my_decoder = tfa.seq2seq.BasicDecoder(
               cell,
               helper,
               decoder_initial_state,
@@ -578,7 +579,7 @@ class BaseModel(object):
           )
 
         # Dynamic decoding
-        outputs, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
+        outputs, final_context_state, _ = tfa.seq2seq.dynamic_decode(
             my_decoder,
             maximum_iterations=maximum_iterations,
             output_time_major=self.time_major,
@@ -671,7 +672,7 @@ class BaseModel(object):
     return tf.no_op()
 
   def infer(self, sess):
-    assert self.mode == tf.contrib.learn.ModeKeys.INFER
+    assert self.mode == "infer"
     output_tuple = InferOutputTuple(infer_logits=self.infer_logits,
                                     infer_summary=self.infer_summary,
                                     sample_id=self.sample_id,
@@ -703,7 +704,7 @@ class BaseModel(object):
 
   def build_encoder_states(self, include_embeddings=False):
     """Stack encoder states and return tensor [batch, length, layer, size]."""
-    assert self.mode == tf.contrib.learn.ModeKeys.INFER
+    assert self.mode == "infer"
     if include_embeddings:
       stack_state_list = tf.stack(
           [self.encoder_emb_inp] + self.encoder_state_list, 2)
@@ -870,9 +871,9 @@ class Model(BaseModel):
                        "pass_hidden_state needs to be set to True")
 
     # For beam search, we need to replicate encoder infos beam_width times
-    if (self.mode == tf.contrib.learn.ModeKeys.INFER and
+    if (self.mode == "infer" and
         hparams.infer_mode == "beam_search"):
-      decoder_initial_state = tf.contrib.seq2seq.tile_batch(
+      decoder_initial_state = tfa.seq2seq.tile_batch(
           encoder_state, multiplier=hparams.beam_width)
     else:
       decoder_initial_state = encoder_state

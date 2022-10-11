@@ -29,6 +29,8 @@ import numpy as np
 import six
 import tensorflow as tf
 
+from ..hparams import HParams 
+
 
 def check_tensorflow_version():
   # LINT.IfChange
@@ -94,7 +96,7 @@ def load_hparams(model_dir):
     with codecs.getreader("utf-8")(tf.io.gfile.GFile(hparams_file, "rb")) as f:
       try:
         hparams_values = json.load(f)
-        hparams = tf.contrib.training.HParams(**hparams_values)
+        hparams = HParams(**hparams_values)
       except ValueError:
         print_out("  can't load hparams file")
         return None

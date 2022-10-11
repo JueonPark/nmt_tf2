@@ -24,6 +24,8 @@ import sys
 # import matplotlib.image as mpimg
 import numpy as np
 import tensorflow as tf
+# from tensorboard.plugins.hparams.api import HParam as HParams
+from .hparams import HParams 
 
 from . import inference
 from . import train
@@ -316,7 +318,7 @@ def add_arguments(parser):
 
 def create_hparams(flags):
   """Create training hparams."""
-  return tf.contrib.training.HParams(
+  return HParams(
       # Data
       src=flags.src,
       tgt=flags.tgt,
@@ -705,3 +707,5 @@ if __name__ == "__main__":
   add_arguments(nmt_parser)
   FLAGS, unparsed = nmt_parser.parse_known_args()
   tf.compat.v1.app.run(main=main, argv=[sys.argv[0]] + unparsed)
+  # tf.compat.v1.app.run(main=main)
+

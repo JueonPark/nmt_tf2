@@ -22,6 +22,7 @@ import time
 import numpy as np
 import six
 import tensorflow as tf
+import tensorflow_addons as tfa
 
 from tensorflow.python.ops import lookup_ops
 from .utils import iterator_utils
@@ -120,7 +121,7 @@ def create_train_model(
       model = model_creator(
           hparams,
           iterator=iterator,
-          mode=tf.contrib.learn.ModeKeys.TRAIN,
+          mode=tf.estimator.ModeKeys.TRAIN,
           source_vocab_table=src_vocab_table,
           target_vocab_table=tgt_vocab_table,
           scope=scope,
@@ -172,7 +173,7 @@ def create_eval_model(model_creator, hparams, scope=None, extra_args=None):
     model = model_creator(
         hparams,
         iterator=iterator,
-        mode=tf.contrib.learn.ModeKeys.EVAL,
+        mode=tf.estimator.ModeKeys.EVAL,
         source_vocab_table=src_vocab_table,
         target_vocab_table=tgt_vocab_table,
         reverse_target_vocab_table=reverse_tgt_vocab_table,
@@ -220,7 +221,7 @@ def create_infer_model(model_creator, hparams, scope=None, extra_args=None):
     model = model_creator(
         hparams,
         iterator=iterator,
-        mode=tf.contrib.learn.ModeKeys.INFER,
+        mode=tf.estimator.ModeKeys.INFER,
         source_vocab_table=src_vocab_table,
         target_vocab_table=tgt_vocab_table,
         reverse_target_vocab_table=reverse_tgt_vocab_table,
@@ -392,7 +393,7 @@ def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
                  residual_connection=False, device_str=None, residual_fn=None):
   """Create an instance of a single RNN cell."""
   # dropout (= 1 - keep_prob) is set to 0 during eval and infer
-  dropout = dropout if mode == tf.contrib.learn.ModeKeys.TRAIN else 0.0
+  dropout = dropout if mode == tf.estimator.ModeKeys.TRAIN else 0.0
 
   # Cell Type
   if unit_type == "lstm":
@@ -406,32 +407,32 @@ def _single_cell(unit_type, num_units, forget_bias, dropout, mode,
   elif unit_type == "layer_norm_lstm":
     utils.print_out("  Layer Normalized LSTM, forget_bias=%g" % forget_bias,
                     new_line=False)
-    single_cell = tf.contrib.rnn.LayerNormBasicLSTMCell(
+    single_cell = tf.compat.v1.nn.rnn_cell.LSTMCell(
         num_units,
         forget_bias=forget_bias,
         layer_norm=True)
   elif unit_type == "nas":
     utils.print_out("  NASCell", new_line=False)
-    single_cell = tf.contrib.rnn.NASCell(num_units)
+    single_cell = tfa.rnn.NASCell(num_units)
   else:
     raise ValueError("Unknown unit type %s!" % unit_type)
 
   # Dropout (= 1 - keep_prob)
   if dropout > 0.0:
-    single_cell = tf.contrib.rnn.DropoutWrapper(
+    single_cell = tf.compat.v1.nn.rnn_cell.DropoutWrapper(
         cell=single_cell, input_keep_prob=(1.0 - dropout))
     utils.print_out("  %s, dropout=%g " %(type(single_cell).__name__, dropout),
                     new_line=False)
 
   # Residual
   if residual_connection:
-    single_cell = tf.contrib.rnn.ResidualWrapper(
+    single_cell = tf.compat.v1.nn.rnn_cell.ResidualWrapper(
         single_cell, residual_fn=residual_fn)
     utils.print_out("  %s" % type(single_cell).__name__, new_line=False)
 
   # Device Wrapper
   if device_str:
-    single_cell = tf.contrib.rnn.DeviceWrapper(single_cell, device_str)
+    single_cell = tf.compat.v1.nn.rnn_cell.DeviceWrapper(single_cell, device_str)
     utils.print_out("  %s, device=%s" %
                     (type(single_cell).__name__, device_str), new_line=False)
 
@@ -480,7 +481,7 @@ def create_rnn_cell(unit_type, num_units, num_layers, num_residual_layers,
     forget_bias: the initial forget bias of the RNNCell(s).
     dropout: floating point value between 0.0 and 1.0:
       the probability of dropout.  this is ignored if `mode != TRAIN`.
-    mode: either tf.contrib.learn.TRAIN/EVAL/INFER
+    mode: either tf.estimator.TRAIN/EVAL/INFER
     num_gpus: The number of gpus to use when performing round-robin
       placement of layers.
     base_gpu: The gpu device id to use for the first RNN cell in the
